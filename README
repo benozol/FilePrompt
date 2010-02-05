@@ -1,0 +1,23 @@
+
+Build & install:
+
+$ runhaskell Setup.lhs configure [--user]
+$ runhaskell Setup.lhs build
+$ runhaskell Setup.lhs install
+
+
+Put something like this in your xmonad.hs:
+
+> import XMonad.Prompt.FilePrompt (FPConf (..), filePrompt, kdeOpen)
+> myKeys conf @ (XConfig {modMask = modMask}) = M.fromList $
+>     [ ...
+>     , ((modMask .|. shiftMask, xK_f), filePrompt fpConf defaultXPConfig)
+>     , ... ]
+>     where
+>       -- fpConf = FPConf (openWith "kioclient exec file:%f") -- This is how kdeOpen works, use whatever command you like.
+>       fpConf = FPConf $ extendOpen vimForNonBinary kdeOpen   -- However, I want all non binary files to open with vim and have the pwd correctly set.
+>         where
+>           vimForNonBinary _ binary =
+>             if not binary
+>                then Just $ openWith "gvim -c ':cd %:h' '%f'"
+>                else Nothing

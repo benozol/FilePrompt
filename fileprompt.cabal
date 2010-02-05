@@ -1,0 +1,14 @@
+name:                fileprompt
+version:             0.1.2
+synopsis:            <Project description>
+description:         <Project description>
+category:            System
+license:             BSD3
+author:              Benus Becker
+data-files:          README
+license-file:        LICENSE
+maintainer:          benusb@gmail.com
+build-depends:       base, filepath, process, directory, haskell98, xmonad -any, xmonad-contrib -any
+build-type:          Simple
+ghc-options:         
+exposed-modules:     XMonad.Prompt.FilePrompt
