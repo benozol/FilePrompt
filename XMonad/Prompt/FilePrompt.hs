@@ -20,7 +20,6 @@ import Directory           (getDirectoryContents)
 import System.Process      (readProcess)
 import System.FilePath     (pathSeparator, splitFileName, (</>))
 import System.Directory    (getHomeDirectory, doesDirectoryExist, doesFileExist)
-import Debug.Trace         (trace)
 
 --------------------------------------------------------------------------------
 -- First, some function to open files at in the end.
@@ -28,7 +27,7 @@ import Debug.Trace         (trace)
 {- Directly specify a command to open a file. The command must contain `%f' as a placeholder for the filename -}
 openWith ∷ MonadIO m ⇒ String → String → m ()
 -- openWith programStr filename = snd `liftM` fixHome (spawn . replace "%f" filename) filename
-openWith program filename = trace (filename ++ " openWith " ++ program) $ snd `liftM` fixHome run filename
+openWith program filename = snd `liftM` fixHome run filename
   where run filename' = spawn (replace "%f" filename' program)
 
 {- Extend a generic file opener by custom opener specified my extension, MIME string and binarity of encoding. -}
@@ -76,7 +75,7 @@ filePrompt fileConf xpConf =
 
 {- Completes a pathname -}
 completePath ∷ String → IO [String]
-completePath pathname = trace ("completePath " ++ pathname) $
+completePath pathname = 
   ifM (doesFileExist pathname) (return []) $
     ifM (doesDirectoryExist pathname) (completeDir pathname) $
       uncurry completePrefix $ splitFileName pathname
