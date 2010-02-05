@@ -15,8 +15,7 @@ Put something like this in your xmonad.hs:
 >     , ((modMask .|. shiftMask, xK_f), filePrompt fpConf defaultXPConfig)
 >     , ... ]
 >     where
->       -- fpConf = FPConf (openWith "kioclient exec file:%f") -- This is how kdeOpen works, use whatever command you like.
->       fpConf = FPConf $ extendOpen vimForNonBinary kdeOpen   -- However, I want all non binary files to open with vim and have the pwd correctly set.
+>       fpConf = FPConf $ extendOpen vimForNonBinary kdeOpen   -- Open all non binary files with vim, otherwise let KDE choose
 >         where
 >           vimForNonBinary _ binary =
 >             if not binary
