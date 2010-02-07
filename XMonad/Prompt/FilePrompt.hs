@@ -4,7 +4,7 @@ module XMonad.Prompt.FilePrompt
   , filePrompt
   , kdeOpen
   , gnomeOpen
-  , mimeOpen
+  -- not yet implemented, mimeOpen 
   , customizeOpen
   , openWith
   ) where
@@ -28,10 +28,9 @@ import System.IO           (hGetLine)
 -- First, some function to open files at in the end.
 
 {- Directly specify a command to open a file. The command must contain `%f' as a placeholder for the filename -}
-openWith ∷ MonadIO m ⇒ String → String → m ()
-openWith program filename = snd `liftM` fixHome run filename
-  where 
-    run filename' = spawn $ replace "%f" filename' program
+openWith ∷ MonadIO m ⇒ (String → String) → String → m ()
+openWith mkprogram filename =
+  fixHome (spawn . mkprogram) (const id) filename
 
 {- Extend a generic file opener by custom opener specified my extension, MIME string and binarity of encoding. -}
 customizeOpen ∷ MonadIO m ⇒
@@ -39,26 +38,23 @@ customizeOpen ∷ MonadIO m ⇒
   (String → m ()) →
   String → m ()
 customizeOpen customization fallback filename = do
-  Just (mime, binary) ← snd `liftM` fixHome fileInfo filename
-  let open = fromMaybe fallback (customization extension mime binary)
-      extension = ifthenelse null (const Nothing) (Just . tail) . takeExtensions $ filename
-  open filename
+  res ← fixHome fileInfo (const id) filename
+  case res of
+    Just (mime, binary) → do
+      let open = fromMaybe fallback (customization extension mime binary)
+          extension = ifthenelse null (const Nothing) (Just . tail) . takeExtensions $ filename
+      open filename
+    Nothing → fallback filename
 
-{- Specify programs to open files, by MIME -}
-mimeOpen ∷ MonadIO m ⇒ [(String, String)] → String → String → String → m ()
-mimeOpen mimeToProgram textViewer binaryViewer filename = do
-  Just (mime, binary) ← fileInfo filename
-  let program       = fromMaybe defaultViewer $ lookup filename mimeToProgram
-      defaultViewer = if binary then binaryViewer else textViewer
-  openWith program filename
+mimeOpen = undefined
 
 {- Open files the KDE4 way. -}
 kdeOpen ∷ MonadIO m ⇒ String → m ()
-kdeOpen = openWith "kioclient exec file:'%f'" 
+kdeOpen = openWith $ ("kioclient exec file:\"" ++) . (++ "\"")
 
 {- Open files the Gnome way. -}
 gnomeOpen ∷ MonadIO m ⇒ String → m ()
-gnomeOpen = openWith "gnome-open '%f'"
+gnomeOpen = openWith $ ("gnome-open \"" ++) . (++ "\"")
 
 --------------------------------------------------------------------------------
 -- The definition of the file prompt.
@@ -103,7 +99,7 @@ completePath pathname =
 
 {- Completes a pathname wrt. to the user's home. -}
 completePath' ∷ String → IO [String]
-completePath' filename = uncurry fmap . second sort <$> fixHome completePath filename
+completePath' filename = fixHome completePath fmap filename
 
 --------------------------------------------------------------------------------
 -- Some utilities, more or less heavily missing from haskell's standard library.
@@ -124,7 +120,7 @@ replace pattern snippet = aux
          else x : aux xs'
 
 fileInfo ∷ MonadIO m ⇒ String → m (Maybe (String, Bool)) -- returns (MIME, binary)
-fileInfo filename = snd `liftM` fixHome (io . aux) filename
+fileInfo filename = fixHome (io . aux) (const id) filename
   where
     parseOutput = second (== "; charset=binary") . span (/= ';')
     aux filename = flip catch (const $ return Nothing) $ do
@@ -137,21 +133,22 @@ fileInfo filename = snd `liftM` fixHome (io . aux) filename
 
 {- Handle relative paths with respect to the user's home directory. -}  
 fixHome ∷ MonadIO m ⇒
-  (String → m a) →        -- original function
-  String →                -- argument
-  m (String → String, a)  -- returns a function to undo the relative directory handling and the result of the original function
-fixHome f "" = do
+  (String → m a) →              -- original function
+  ((String → String) → a → a) → -- how to redo the fixing
+  String →                      -- argument
+  m a                           -- returns a function to undo the relative directory handling and the result of the original function
+fixHome f g "" = do
   home ← io getHomeDirectory
   let post = drop (length home + 1)
-  (,) post `liftM` f home
-fixHome f ('~':'/':filename) = do
+  g post `liftM` f home
+fixHome f g ('~':'/':filename) = do
   home ← io getHomeDirectory
   let post = ("~" ++) . drop (length home)
-  (,) post `liftM` f (home </> filename)
-fixHome f filename@('/':_) =
-  (,) id `liftM` f filename
-fixHome f filename = do
+  g post `liftM` f (home </> filename)
+fixHome f g filename@('/':_) =
+  g id `liftM` f filename
+fixHome f g filename = do
   home ← io getHomeDirectory
   let post = drop (length home + 1)
-  (,) post `liftM` f (home </> filename)
+  g post `liftM` f (home </> filename)
 
