@@ -3,6 +3,7 @@ module XMonad.Prompt.FilePrompt
   ( FPConf (..)
   , filePrompt
   , kdeOpen
+  , gnomeOpen
   , mimeOpen
   , customizeOpen
   , openWith
@@ -17,37 +18,36 @@ import Control.Applicative ((<$>))
 import Data.List           (sort, span, isPrefixOf)
 import Data.Maybe          (fromMaybe)
 import Directory           (getDirectoryContents)
-import System.Process      (readProcess)
-import System.FilePath     (pathSeparator, splitFileName, (</>))
+import System.FilePath     (pathSeparator, splitFileName, (</>), takeExtensions)
 import System.Directory    (getHomeDirectory, doesDirectoryExist, doesFileExist)
+import System.Process      (proc, createProcess, CreateProcess (std_out, cwd), StdStream (CreatePipe), waitForProcess)
+import System.Exit         (ExitCode (ExitSuccess))
+import System.IO           (hGetLine)
 
 --------------------------------------------------------------------------------
 -- First, some function to open files at in the end.
 
 {- Directly specify a command to open a file. The command must contain `%f' as a placeholder for the filename -}
 openWith ∷ MonadIO m ⇒ String → String → m ()
--- openWith programStr filename = snd `liftM` fixHome (spawn . replace "%f" filename) filename
 openWith program filename = snd `liftM` fixHome run filename
-  where run filename' = spawn (replace "%f" filename' program)
+  where 
+    run filename' = spawn $ replace "%f" filename' program
 
 {- Extend a generic file opener by custom opener specified my extension, MIME string and binarity of encoding. -}
 customizeOpen ∷ MonadIO m ⇒
-  (Maybe String → String → Bool → Maybe (String → m ())) -- map extension, if any, the MIME type and the binarity to maybe an X to open a file
-  → (String → m ())                                      -- fallback to open files
-  → String → m ()
-customizeOpen custom_open fallback pathname = do
-  (mime, binary) ← fileInfo pathname
-  let filename  = snd . splitFileName $ pathname
-      extension = if '.' `elem` filename
-                    then Just . reverse . takeWhile (/= '.') . reverse $ filename
-                    else Nothing
-      open = fromMaybe fallback $ custom_open extension mime binary
-  open pathname
+  (Maybe String → String → Bool → Maybe (String → m ())) →
+  (String → m ()) →
+  String → m ()
+customizeOpen customization fallback filename = do
+  Just (mime, binary) ← snd `liftM` fixHome fileInfo filename
+  let open = fromMaybe fallback (customization extension mime binary)
+      extension = ifthenelse null (const Nothing) (Just . tail) . takeExtensions $ filename
+  open filename
 
 {- Specify programs to open files, by MIME -}
 mimeOpen ∷ MonadIO m ⇒ [(String, String)] → String → String → String → m ()
 mimeOpen mimeToProgram textViewer binaryViewer filename = do
-  (mime, binary) ← fileInfo filename
+  Just (mime, binary) ← fileInfo filename
   let program       = fromMaybe defaultViewer $ lookup filename mimeToProgram
       defaultViewer = if binary then binaryViewer else textViewer
   openWith program filename
@@ -56,10 +56,14 @@ mimeOpen mimeToProgram textViewer binaryViewer filename = do
 kdeOpen ∷ MonadIO m ⇒ String → m ()
 kdeOpen = openWith "kioclient exec file:'%f'" 
 
+{- Open files the Gnome way. -}
+gnomeOpen ∷ MonadIO m ⇒ String → m ()
+gnomeOpen = openWith "gnome-open '%f'"
+
 --------------------------------------------------------------------------------
 -- The definition of the file prompt.
 
-data FPConf = FPConf { open ∷ String → X () }
+newtype FPConf = FPConf { open ∷ String → X () }
 
 data FilePrompt = FilePrompt
 
@@ -97,14 +101,18 @@ completePath pathname =
       isDir ← doesDirectoryExist (dirname </> filename)
       return $ if isDir then filename ++ "/" else filename
 
+{- Completes a pathname wrt. to the user's home. -}
 completePath' ∷ String → IO [String]
-completePath' filename = appendOriginal . uncurry fmap . second sort <$> fixHome completePath filename
-  where appendOriginal = if filename /= "" then (filename :) else id
+completePath' filename = uncurry fmap . second sort <$> fixHome completePath filename
 
 --------------------------------------------------------------------------------
--- Some utilities, more or less heavily missing from the haskell standard API.
+-- Some utilities, more or less heavily missing from haskell's standard library.
 
+ifM ∷ Monad m ⇒ m Bool → m a → m a → m a
 ifM t a b = t >>= \x -> if x then a else b
+
+ifthenelse ∷ (a → Bool) → (a → b) → (a → b) → a → b
+ifthenelse test dann sonst = \x → if test x then dann x else sonst x
 
 replace ∷ Eq a ⇒ [a] → [a] → [a] → [a]
 replace pattern snippet = aux
@@ -115,17 +123,23 @@ replace pattern snippet = aux
          then (snippet ++) . aux $ drop (length pattern) xs
          else x : aux xs'
 
-fileInfo ∷ MonadIO m ⇒ String → m (String, Bool) -- returns (MIME, binary)
-fileInfo filename = snd `liftM` fixHome aux filename
+fileInfo ∷ MonadIO m ⇒ String → m (Maybe (String, Bool)) -- returns (MIME, binary)
+fileInfo filename = snd `liftM` fixHome (io . aux) filename
   where
-    aux filename = io $ readOutput <$> readProcess "file" ["-bi", filename] ""
-    readOutput = second (== "; charset=binary\n") . span (/= ';')
+    parseOutput = second (== "; charset=binary") . span (/= ';')
+    aux filename = flip catch (const $ return Nothing) $ do
+      home ← getHomeDirectory
+      let cp = (proc "file" ["-bi", filename]) { std_out = CreatePipe, cwd = Just home }
+      (_, Just hout, _, ph) ← createProcess cp
+      ifM ((ExitSuccess ==) <$> waitForProcess ph)
+         (Just . parseOutput <$> hGetLine hout) 
+         (return Nothing)
 
 {- Handle relative paths with respect to the user's home directory. -}  
 fixHome ∷ MonadIO m ⇒
-  (String → m a)            -- original function
-  → String                  -- argument
-  → m (String → String, a)  -- returns a function to undo the relative directory handling and the result of the original function
+  (String → m a) →        -- original function
+  String →                -- argument
+  m (String → String, a)  -- returns a function to undo the relative directory handling and the result of the original function
 fixHome f "" = do
   home ← io getHomeDirectory
   let post = drop (length home + 1)
@@ -140,5 +154,4 @@ fixHome f filename = do
   home ← io getHomeDirectory
   let post = drop (length home + 1)
   (,) post `liftM` f (home </> filename)
-
 
