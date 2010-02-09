@@ -7,6 +7,7 @@ module XMonad.Prompt.FilePrompt
   -- not yet implemented, mimeOpen 
   , customizeOpen
   , openWith
+  , substituteIn
   ) where
 
 import XMonad              (X, spawn, MonadIO)
@@ -15,10 +16,10 @@ import XMonad.Prompt       (XPrompt (..), mkXPrompt, XPConfig, getNextCompletion
 import Control.Monad       ((>>=), (>>), liftM)
 import Control.Arrow       (second)
 import Control.Applicative ((<$>))
-import Data.List           (sort, span, isPrefixOf)
+import Data.List           (sort, span, isPrefixOf, stripPrefix)
 import Data.Maybe          (fromMaybe)
 import Directory           (getDirectoryContents)
-import System.FilePath     (pathSeparator, splitFileName, (</>), takeExtensions)
+import System.FilePath     (pathSeparator, splitFileName, (</>), takeExtensions, takeFileName)
 import System.Directory    (getHomeDirectory, doesDirectoryExist, doesFileExist)
 import System.Process      (proc, createProcess, CreateProcess (std_out, cwd), StdStream (CreatePipe), waitForProcess)
 import System.Exit         (ExitCode (ExitSuccess))
@@ -50,11 +51,11 @@ mimeOpen = undefined
 
 {- Open files the KDE4 way. -}
 kdeOpen ∷ MonadIO m ⇒ String → m ()
-kdeOpen = openWith $ ("kioclient exec file:\"" ++) . (++ "\"")
+kdeOpen = openWith ("@" `substituteIn` "kioclient exec file:'@'")
 
 {- Open files the Gnome way. -}
 gnomeOpen ∷ MonadIO m ⇒ String → m ()
-gnomeOpen = openWith $ ("gnome-open \"" ++) . (++ "\"")
+gnomeOpen = openWith ("@" `substituteIn` "gnome-open '@'")
 
 --------------------------------------------------------------------------------
 -- The definition of the file prompt.
@@ -80,7 +81,8 @@ completePath pathname =
     ifM (doesDirectoryExist pathname) (completeDir pathname) $
       uncurry completePrefix $ splitFileName pathname
   where
-    filterHidden = filter ((/=) '.' . head)
+    showHidden   = (== ".") . take 1 . takeFileName $ pathname
+    filterHidden = if showHidden then id else filter ((/=) '.' . head)
     completeDir pathname =
       sequence . fmap (addTrailingSlashes pathname) =<<
         fmap (pathname </>) . filterHidden <$>
@@ -110,14 +112,13 @@ ifM t a b = t >>= \x -> if x then a else b
 ifthenelse ∷ (a → Bool) → (a → b) → (a → b) → a → b
 ifthenelse test dann sonst = \x → if test x then dann x else sonst x
 
-replace ∷ Eq a ⇒ [a] → [a] → [a] → [a]
-replace pattern snippet = aux
-  where
-    aux [] = []
-    aux xs@(x:xs') =
-      if pattern `isPrefixOf` xs
-         then (snippet ++) . aux $ drop (length pattern) xs
-         else x : aux xs'
+{- substituteIn xs ys zs substitutes in zs all occurrences of xs by ys. -}
+substituteIn ∷ Eq a ⇒ [a] → [a] → [a] → [a]
+substituteIn _ [] _ = []
+substituteIn xs ys@(y:ys') zs =
+  case xs `stripPrefix` ys of
+    Nothing → y : substituteIn xs ys' zs
+    Just ys'' → zs ++ substituteIn xs ys'' zs
 
 fileInfo ∷ MonadIO m ⇒ String → m (Maybe (String, Bool)) -- returns (MIME, binary)
 fileInfo filename = fixHome (io . aux) (const id) filename
