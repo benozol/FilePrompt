@@ -1,13 +1,14 @@
 {-# LANGUAGE UnicodeSyntax #-}
-module XMonad.Prompt.FilePrompt 
+-- | This module offers a XMonad promt to open files with.
+module XMonad.Prompt.FilePrompt
   ( FPConf (..)
   , filePrompt
   , kdeOpen
   , gnomeOpen
-  -- not yet implemented, mimeOpen 
+  -- not yet implemented: mimeOpen
   , customizeOpen
   , openWith
-  , substituteIn
+  , substitute
   ) where
 
 import XMonad              (X, spawn, MonadIO)
@@ -26,14 +27,14 @@ import System.Exit         (ExitCode (ExitSuccess))
 import System.IO           (hGetLine)
 
 --------------------------------------------------------------------------------
--- First, some function to open files at in the end.
+-- * First, some function to open files at in the end.
 
-{- Directly specify a command to open a file. The command must contain `%f' as a placeholder for the filename -}
+-- |Directly specify a command (@String → String@) to open a file.
 openWith ∷ MonadIO m ⇒ (String → String) → String → m ()
 openWith mkprogram filename =
   fixHome (spawn . mkprogram) (const id) filename
 
-{- Extend a generic file opener by custom opener specified my extension, MIME string and binarity of encoding. -}
+-- |Extend a generic file opener by custom opener specified my extension, MIME string and binarity of encoding.
 customizeOpen ∷ MonadIO m ⇒
   (Maybe String → String → Bool → Maybe (String → m ())) →
   (String → m ()) →
@@ -45,17 +46,18 @@ customizeOpen customization fallback filename = do
       let open = fromMaybe fallback (customization extension mime binary)
           extension = ifthenelse null (const Nothing) (Just . tail) . takeExtensions $ filename
       open filename
-    Nothing → fallback filename
+    Nothing →
+      fallback filename
 
 mimeOpen = undefined
 
-{- Open files the KDE4 way. -}
+-- |Open files the KDE4 way.
 kdeOpen ∷ MonadIO m ⇒ String → m ()
-kdeOpen = openWith ("@" `substituteIn` "kioclient exec file:'@'")
+kdeOpen = openWith ("kioclient exec file:'@'" `substitute` "@")
 
-{- Open files the Gnome way. -}
+-- |Open files the Gnome way.
 gnomeOpen ∷ MonadIO m ⇒ String → m ()
-gnomeOpen = openWith ("@" `substituteIn` "gnome-open '@'")
+gnomeOpen = openWith ("gnome-open '@'" `substitute` "@")
 
 --------------------------------------------------------------------------------
 -- The definition of the file prompt.
@@ -69,14 +71,14 @@ instance XPrompt FilePrompt where
   nextCompletion FilePrompt = getNextCompletion
   commandToComplete FilePrompt = id
 
-{- This file promt lets you open files from the xmonad prompt. -}
+-- |This file promt lets you open files from the xmonad prompt.
 filePrompt ∷ FPConf → XPConfig → X ()
 filePrompt fileConf xpConf =
   mkXPrompt FilePrompt xpConf completePath' (open fileConf)
 
-{- Completes a pathname -}
+-- |Completes a pathname
 completePath ∷ String → IO [String]
-completePath pathname = 
+completePath pathname =
   ifM (doesFileExist pathname) (return []) $
     ifM (doesDirectoryExist pathname) (completeDir pathname) $
       uncurry completePrefix $ splitFileName pathname
@@ -99,12 +101,12 @@ completePath pathname =
       isDir ← doesDirectoryExist (dirname </> filename)
       return $ if isDir then filename ++ "/" else filename
 
-{- Completes a pathname wrt. to the user's home. -}
+-- |Completes a pathname wrt. to the user's home.
 completePath' ∷ String → IO [String]
 completePath' filename = fixHome completePath fmap filename
 
 --------------------------------------------------------------------------------
--- Some utilities, more or less heavily missing from haskell's standard library.
+-- * Some utilities, more or less heavily missing from haskell's standard library.
 
 ifM ∷ Monad m ⇒ m Bool → m a → m a → m a
 ifM t a b = t >>= \x -> if x then a else b
@@ -112,13 +114,13 @@ ifM t a b = t >>= \x -> if x then a else b
 ifthenelse ∷ (a → Bool) → (a → b) → (a → b) → a → b
 ifthenelse test dann sonst = \x → if test x then dann x else sonst x
 
-{- substituteIn xs ys zs substitutes in zs all occurrences of xs by ys. -}
-substituteIn ∷ Eq a ⇒ [a] → [a] → [a] → [a]
-substituteIn _ [] _ = []
-substituteIn xs ys@(y:ys') zs =
-  case xs `stripPrefix` ys of
-    Nothing → y : substituteIn xs ys' zs
-    Just ys'' → zs ++ substituteIn xs ys'' zs
+-- |@substitute xs pattern target@ substitutes all occurrences of target in xs by pattern.
+substitute ∷ Eq a ⇒ [a] → [a] → [a] → [a]
+substitute [] _ _ = []
+substitute xs@(x:xs') pattern target =
+  case xs `stripPrefix` pattern of
+    Just xs'' → target ++ substitute xs'' pattern target
+    Nothing   → x : substitute xs' pattern target
 
 fileInfo ∷ MonadIO m ⇒ String → m (Maybe (String, Bool)) -- returns (MIME, binary)
 fileInfo filename = fixHome (io . aux) (const id) filename
@@ -129,15 +131,15 @@ fileInfo filename = fixHome (io . aux) (const id) filename
       let cp = (proc "file" ["-bi", filename]) { std_out = CreatePipe, cwd = Just home }
       (_, Just hout, _, ph) ← createProcess cp
       ifM ((ExitSuccess ==) <$> waitForProcess ph)
-         (Just . parseOutput <$> hGetLine hout) 
+         (Just . parseOutput <$> hGetLine hout)
          (return Nothing)
 
-{- Handle relative paths with respect to the user's home directory. -}  
+-- |Handle relative paths with respect to the user's home directory.
 fixHome ∷ MonadIO m ⇒
-  (String → m a) →              -- original function
-  ((String → String) → a → a) → -- how to redo the fixing
-  String →                      -- argument
-  m a                           -- returns a function to undo the relative directory handling and the result of the original function
+  (String → m a) →              -- ^original function
+  ((String → String) → a → a) → -- ^how to unapply the fixing @(String → String)@ on @a@
+  String →                      -- ^(relative) pathname
+  m a                           -- ^result of the original function wrt. to the home directory
 fixHome f g "" = do
   home ← io getHomeDirectory
   let post = drop (length home + 1)
