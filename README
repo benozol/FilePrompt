@@ -13,6 +13,7 @@ Put something like this in your xmonad.hs:
 > myKeys conf @ (XConfig {modMask = modMask}) = M.fromList $
 >     [ ...
 >     , ((modMask .|. shiftMask, xK_f), filePrompt fpConf defaultXPConfig)
+>     , ((modMask .|. shiftMask, xK_f), filePrompt (FPConf kdeOpen) defaultXPConfig) -- ... to just use the vanilla KDE file opening mechanism
 >     , ... ]
 >     where
 >       fpConf = FPConf $ extendOpen vimForNonBinary kdeOpen   -- Open all non binary files with vim, otherwise let KDE choose
