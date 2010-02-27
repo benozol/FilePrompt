@@ -114,7 +114,8 @@ ifM t a b = t >>= \x -> if x then a else b
 ifthenelse ∷ (a → Bool) → (a → b) → (a → b) → a → b
 ifthenelse test dann sonst = \x → if test x then dann x else sonst x
 
--- |@substitute xs pattern target@ substitutes all occurrences of target in xs by pattern.
+-- |@substitute string pattern target@ substitutes all occurrences of the
+-- @pattern@ in @string@ by @target@.
 substitute ∷ Eq a ⇒ [a] → [a] → [a] → [a]
 substitute [] _ _ = []
 substitute xs@(x:xs') pattern target =
@@ -122,6 +123,7 @@ substitute xs@(x:xs') pattern target =
     Just xs'' → target ++ substitute xs'' pattern target
     Nothing   → x : substitute xs' pattern target
 
+-- |Returns the MIME type of a file and wether it is a binary file.
 fileInfo ∷ MonadIO m ⇒ String → m (Maybe (String, Bool)) -- returns (MIME, binary)
 fileInfo filename = fixHome (io . aux) (const id) filename
   where
@@ -136,7 +138,7 @@ fileInfo filename = fixHome (io . aux) (const id) filename
 
 -- |Handle relative paths with respect to the user's home directory.
 fixHome ∷ MonadIO m ⇒
-  (String → m a) →              -- ^original function
+  (String → m a) →              -- ^original function, takes a (relative) pathname
   ((String → String) → a → a) → -- ^how to unapply the fixing @(String → String)@ on @a@
   String →                      -- ^(relative) pathname
   m a                           -- ^result of the original function wrt. to the home directory
