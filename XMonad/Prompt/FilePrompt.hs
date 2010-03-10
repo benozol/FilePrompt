@@ -11,9 +11,6 @@ module XMonad.Prompt.FilePrompt
   , substitute
   ) where
 
-import XMonad              (X, spawn, MonadIO)
-import XMonad.Core         (io)
-import XMonad.Prompt       (XPrompt (..), mkXPrompt, XPConfig, getNextCompletion)
 import Control.Monad       ((>>=), (>>), liftM)
 import Control.Arrow       (second)
 import Control.Applicative ((<$>))
@@ -25,6 +22,9 @@ import System.Directory    (getHomeDirectory, doesDirectoryExist, doesFileExist)
 import System.Process      (proc, createProcess, CreateProcess (std_out, cwd), StdStream (CreatePipe), waitForProcess)
 import System.Exit         (ExitCode (ExitSuccess))
 import System.IO           (hGetLine)
+import XMonad              (X, spawn, MonadIO)
+import XMonad.Core         (io)
+import XMonad.Prompt       (XPrompt (..), mkXPrompt, XPConfig, getNextCompletion)
 
 --------------------------------------------------------------------------------
 -- * First, some function to open files at in the end.
@@ -40,13 +40,13 @@ customizeOpen ∷ MonadIO m ⇒
   (String → m ()) →
   String → m ()
 customizeOpen customization fallback filename = do
-  res ← fixHome fileInfo (const id) filename
+  res ← fileInfo filename
   case res of
     Just (mime, binary) → do
       let open = fromMaybe fallback (customization extension mime binary)
           extension = ifthenelse null (const Nothing) (Just . tail) . takeExtensions $ filename
       open filename
-    Nothing →
+    Nothing → do
       fallback filename
 
 mimeOpen = undefined
@@ -119,22 +119,30 @@ ifthenelse test dann sonst = \x → if test x then dann x else sonst x
 substitute ∷ Eq a ⇒ [a] → [a] → [a] → [a]
 substitute [] _ _ = []
 substitute xs@(x:xs') pattern target =
-  case xs `stripPrefix` pattern of
+  case pattern `stripPrefix` xs of
     Just xs'' → target ++ substitute xs'' pattern target
     Nothing   → x : substitute xs' pattern target
 
 -- |Returns the MIME type of a file and wether it is a binary file.
 fileInfo ∷ MonadIO m ⇒ String → m (Maybe (String, Bool)) -- returns (MIME, binary)
-fileInfo filename = fixHome (io . aux) (const id) filename
+fileInfo filename = io . catch aux $ \e → print e >> return Nothing
   where
-    parseOutput = second (== "; charset=binary") . span (/= ';')
-    aux filename = flip catch (const $ return Nothing) $ do
+    aux = do
       home ← getHomeDirectory
       let cp = (proc "file" ["-bi", filename]) { std_out = CreatePipe, cwd = Just home }
       (_, Just hout, _, ph) ← createProcess cp
-      ifM ((ExitSuccess ==) <$> waitForProcess ph)
-         (Just . parseOutput <$> hGetLine hout)
-         (return Nothing)
+      -- res ← do
+      --   mr ← getProcessExitCode ph
+      --   case mr of
+      --        Nothing → waitForProcess ph
+      --        Just res → return res
+      -- FIXME The following is a workaround as waitForProcess always throws
+      -- "waitForProcess: does not exist (No child processes)"
+      res ← catch (waitForProcess ph) (const $ return ExitSuccess) 
+      if res == ExitSuccess
+         then Just . parseOutput <$> hGetLine hout
+         else return Nothing
+    parseOutput = second (== "; charset=binary") . span (/= ';')
 
 -- |Handle relative paths with respect to the user's home directory.
 fixHome ∷ MonadIO m ⇒
