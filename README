@@ -15,9 +15,10 @@ Put something like this in your xmonad.hs:
 >     , ((modMask .|. shiftMask, xK_f), filePrompt fpConf defaultXPConfig)
 >     , ... ]
 >     where
->       -- to just use the vanilla KDE file opening mechanism:
->       -- fpConf = FPConf kdeOpen
->       fpConf = FPConf $ extendOpen vimForNonBinary kdeOpen   -- Open all non binary files with vim, otherwise let KDE choose
+>       -- use KDE to actually open the file
+>       fpConf = FPConf kdeOpen
+>       -- My configuration: open all non binary files with vim, otherwise delegate to KDE
+>       -- fpConf = FPConf $ extendOpen vimForNonBinary kdeOpen   
 >         where
 >           vimForNonBinary _ binary =
 >             if not binary
